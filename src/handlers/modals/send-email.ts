@@ -1,13 +1,16 @@
 import type { ModalSubmitInteraction } from "discord.js";
+import { buildFeedbackEmbed } from "../../builders/feedback-embed";
 import { updateFeedbackResponse, updateFeedbackStatus } from "../../notion";
 import { sendEmail } from "../../resend";
 import { sessionManager } from "../../sessions/manager";
+import { store } from "../../store";
 import type { ModalHandler } from "../index";
 
 export const sendEmailModal: ModalHandler = {
   customIdPrefix: "modal_send_email",
 
   async execute(interaction: ModalSubmitInteraction, arg?: string) {
+    const [pageId, messageId] = arg?.split(":") ?? [];
     const to = interaction.fields.getTextInputValue("email_to");
     const subject = interaction.fields.getTextInputValue("email_subject");
     const body = interaction.fields.getTextInputValue("email_body");
@@ -21,16 +24,27 @@ export const sendEmailModal: ModalHandler = {
         flags: 64,
       });
 
-      if (interaction.message) {
-        await sessionManager.close(interaction.message.id);
+      const link = pageId ? `https://resend.com/emails/${emailId}?tab=text` : "";
+
+      if (pageId) {
+        const entry = store.get(pageId);
+        if (entry) {
+          entry.status = "In Progress";
+          entry.responseText = body;
+          entry.responseLink = link;
+          await interaction.editReply({ embeds: [buildFeedbackEmbed(entry)] });
+        }
       }
 
-      if (arg) {
-        const link = `https://resend.com/emails/${emailId}?tab=text`;
-        updateFeedbackResponse(arg, link, body).catch((error) => {
+      if (messageId) {
+        await sessionManager.close(messageId);
+      }
+
+      if (pageId) {
+        updateFeedbackResponse(pageId, link, body).catch((error) => {
           console.error("Failed to update Notion response:", error);
         });
-        updateFeedbackStatus(arg, "In Progress").catch((error) => {
+        updateFeedbackStatus(pageId, "In Progress").catch((error) => {
           console.error("Failed to update Notion status:", error);
         });
       }

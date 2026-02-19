@@ -27,7 +27,7 @@ export const sendEmailButton: ButtonHandler = {
     const { subject, body } = parseSubjectAndBody(entry.draftResponse);
 
     const modal = new ModalBuilder()
-      .setCustomId(`modal_send_email:${pageId}`)
+      .setCustomId(`modal_send_email:${pageId}:${interaction.message.id}`)
       .setTitle("Send Email");
 
     const emailTo = new TextInputBuilder()
