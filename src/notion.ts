@@ -1,5 +1,12 @@
 import { Client } from "@notionhq/client";
 import { config } from "./config";
+import {
+  getLastPollTime,
+  hasSeenPage,
+  markPageSeen,
+  pruneOldPages,
+  setLastPollTime,
+} from "./poller-store";
 
 const notion = new Client({ auth: config.NOTION_TOKEN });
 
@@ -123,17 +130,19 @@ export async function updateFeedbackStatus(
 export function startNotionPoller(
   onNewPage: (page: NotionFeedbackPage) => void,
 ): void {
-  let lastPollTime = new Date().toISOString();
+  let lastPollCursor = getLastPollTime() ?? new Date().toISOString();
+
+  // Prune seen-pages older than 30 days on startup
+  pruneOldPages(30);
 
   const poll = async () => {
     try {
-      
-  console.log("Polling Notion for new pages since", lastPollTime);
+      console.log("Polling Notion for new pages since", lastPollCursor);
       const response = await notion.databases.query({
         database_id: config.NOTION_DATABASE_ID,
         filter: {
           timestamp: "created_time",
-          created_time: { after: lastPollTime },
+          created_time: { after: lastPollCursor },
         },
         sorts: [{ timestamp: "created_time", direction: "ascending" }],
       });
@@ -141,18 +150,23 @@ export function startNotionPoller(
       console.log(`Notion poll returned ${response.results.length} results`);
 
       for (const result of response.results) {
-        console.log(result)
         const page = extractPage(result);
-        if (page) {
-          console.log(result);
-          onNewPage(page);
+        if (!page) continue;
+
+        if (hasSeenPage(page.pageId)) {
+          console.log(`Skipping already-seen page ${page.pageId}`);
+          continue;
         }
+
+        markPageSeen(page.pageId);
+        onNewPage(page);
       }
 
       if (response.results.length > 0) {
         const lastPage = response.results[response.results.length - 1];
         if ("created_time" in lastPage) {
-          lastPollTime = lastPage.created_time;
+          lastPollCursor = lastPage.created_time;
+          setLastPollTime(lastPollCursor);
         }
       }
     } catch (error) {
@@ -161,5 +175,5 @@ export function startNotionPoller(
   };
 
   setInterval(poll, 5 * 1000);
-  console.log("Notion poller started (10s interval)");
+  console.log("Notion poller started (5s interval)");
 }
