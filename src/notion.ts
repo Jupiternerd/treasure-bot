@@ -2,8 +2,9 @@ import { Client } from "@notionhq/client";
 import { config } from "./config";
 import {
   getLastPollTime,
-  hasSeenPage,
-  markPageSeen,
+  tryMarkPageSeen,
+  tryMarkContentSeen,
+  hashFeedbackContent,
   pruneOldPages,
   setLastPollTime,
 } from "./poller-store";
@@ -127,9 +128,9 @@ export async function updateFeedbackStatus(
   });
 }
 
-export function startNotionPoller(
-  onNewPage: (page: NotionFeedbackPage) => void,
-): void {
+export async function startNotionPoller(
+  onNewPage: (page: NotionFeedbackPage) => void | Promise<void>,
+): Promise<void> {
   let lastPollCursor = getLastPollTime() ?? new Date().toISOString();
 
   // Prune seen-pages older than 30 days on startup
@@ -153,13 +154,18 @@ export function startNotionPoller(
         const page = extractPage(result);
         if (!page) continue;
 
-        if (hasSeenPage(page.pageId)) {
+        if (!tryMarkPageSeen(page.pageId)) {
           console.log(`Skipping already-seen page ${page.pageId}`);
           continue;
         }
 
-        markPageSeen(page.pageId);
-        onNewPage(page);
+        const contentHash = hashFeedbackContent(page.feedbackType, page.lovelyTellUsMore, page.whatsBroken);
+        if (!tryMarkContentSeen(contentHash, page.pageId)) {
+          console.log(`Skipping duplicate content for page ${page.pageId}`);
+          continue;
+        }
+
+        await onNewPage(page);
       }
 
       if (response.results.length > 0) {
@@ -174,6 +180,12 @@ export function startNotionPoller(
     }
   };
 
-  setInterval(poll, 5 * 1000);
-  console.log("Notion poller started (5s interval)");
+  const scheduleNext = () => setTimeout(async () => {
+    await poll();
+    scheduleNext();
+  }, 5 * 1000);
+
+  await poll();
+  scheduleNext();
+  console.log("Notion poller started (5s chained timeout)");
 }

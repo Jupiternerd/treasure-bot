@@ -21,7 +21,7 @@ client.once("clientReady", async (c) => {
   sessionManager.setClient(c);
   await sessionManager.rehydrate();
 
-  startNotionPoller(async (page) => {
+  await startNotionPoller(async (page) => {
     try {
       const draftResponse = await generateDraft(page);
 
